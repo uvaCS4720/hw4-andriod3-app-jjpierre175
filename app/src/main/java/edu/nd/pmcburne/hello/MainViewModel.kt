@@ -5,37 +5,47 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import android.app.Application
+import androidx.lifecycle.*
+import kotlinx.coroutines.launch
 
-data class MainUIState(
-    val counterValue: Int
-)
+class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-class MainViewModel(
-    val initialCounterValue: Int = 0
-) : ViewModel() {
-    private val _uiState = MutableStateFlow(MainUIState(initialCounterValue))
-    val uiState: StateFlow<MainUIState> = _uiState.asStateFlow()
+    // repo handles data operations
+    private val repo = Repository(AppDatabase.getInstance(application).locationDao())
 
-    fun incrementCounter() {
-        _uiState.update{ currentState ->
-            currentState.copy(counterValue = _uiState.value.counterValue + 1)
+    // holds list of locations from the db
+    private val _allLocations = MutableStateFlow<List<Location>>(emptyList())
+    private val _tags = MutableStateFlow<List<String>>(emptyList()) // holds all the unique tags from the db
+    val tags: StateFlow<List<String>> = _tags // tags for ui
+
+    private val _selectedTag = MutableStateFlow("core") // stores the current tag used for filtering locations
+    val selectedTag: StateFlow<String> = _selectedTag // for ui
+
+    val filteredLocations: StateFlow<List<Location>> = // derived below
+        MutableStateFlow(emptyList())
+
+    // Better: use combine in init
+    private val _filteredLocations = MutableStateFlow<List<Location>>(emptyList())
+    val filtered: StateFlow<List<Location>> = _filteredLocations
+
+    init { // runs when the viewmodel is created
+        viewModelScope.launch {
+            repo.syncFromApi()  // sync data from api into the local db
+            _allLocations.value = repo.getAllLocations() // load all the locations from the db
+            _tags.value = repo.getAllTags() // load  all available tags
+            applyFilter() // apply the initial filter based on the default tag
         }
     }
 
-    fun decrementCounter() {
-        _uiState.update{ currentState ->
-            currentState.copy(counterValue = _uiState.value.counterValue - 1)
-        }
+    fun selectTag(tag: String) { // updates the selected tag when the user chooses a new one
+        _selectedTag.value = tag // update the selected tag
+        applyFilter() // recalculate the filtered locations
     }
 
-    fun resetCounter() {
-        _uiState.update { currentState ->
-            currentState.copy(counterValue = 0)
+    private fun applyFilter() { // filters locations based on the currently selected tag
+        _filteredLocations.value = _allLocations.value.filter { location ->
+            location.tags.split(",").map { it.trim() }.contains(_selectedTag.value)
         }
     }
-
-    val isDecrementEnabled: Boolean
-        get() = _uiState.value.counterValue > 0
-    val isResetEnabled: Boolean
-        get() = _uiState.value.counterValue > 0
 }
